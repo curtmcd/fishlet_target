@@ -1,9 +1,10 @@
 // Fishlet Shooting Targets in PDF using the Cairo drawing library
 // (c) 2022 Curt McDowell
 
-#include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
+#include <iostream>
+#include <sstream>
+#include <cassert>
+
 #include <math.h>
 #include <string.h>
 #include <getopt.h>
@@ -11,56 +12,58 @@
 #include <cairo.h>
 #include <cairo-pdf.h>
 
-#define DEFAULT_GEOM		"8.5x11"
-#define DEFAULT_MARGIN		0.25
-#define DEFAULT_FNAME		"target.pdf"
-#define DEFAULT_RINGS		8
-#define DEFAULT_ORINGS		2
-#define DEFAULT_IRINGS		3
-#define DEFAULT_LINEW		0.05
+using namespace std;
 
-#define INCH_PT(i)		((i) * 72.0)
-#define PT_INCH(i)		((i) / 72.0)
+const char *DEFAULT_GEOM = "8.5x11";
+const double DEFAULT_MARGIN = 0.25;
+const char *DEFAULT_FNAME = "target.pdf";
+const int DEFAULT_RINGS = 8;
+const int DEFAULT_ORINGS = 2;
+const int DEFAULT_IRINGS = 3;
+const double DEFAULT_LINEW = 0.05;
 
-#define FISH_IMAGE		"koi.png"
+const char *FISH_IMAGE = "koi.png";
 
-int
+double
+inch_pt(double i)
+{
+    return i * 72.0;
+}
+
+double
+pt_inch(double p)
+{
+    return p / 72.0;
+}
+
+constexpr int
 gcd(int a, int b)
 {
     return (a == 0) ? b : (a < b) ? gcd(a, b % a) : gcd(b, a);
 }
 
 void
-perr(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap,fmt);
-    vfprintf(stderr, fmt, ap);
-    fflush(stderr);
-}
-
-void
 usage()
 {
-    perr("Usage: target [options]\n");
-    perr("   -s WxH       Set size in inches, default %s\n", DEFAULT_GEOM);
-    perr("   -m MARGIN    Set page margin, default %g\n", DEFAULT_MARGIN);
-    perr("   -o FNAME     Set output filename, default %s\n", DEFAULT_FNAME);
-    perr("   -r RINGS     Set number of rings, default %d\n", DEFAULT_RINGS);
-    perr("   -I IRINGS    Set number of inner rings, default %d\n", DEFAULT_IRINGS);
-    perr("   -O ORINGS    Set number of outer rings, default %d\n", DEFAULT_ORINGS);
-    perr("   -l LINEW     Set line width, default %d\n", DEFAULT_LINEW);
-    perr("   -b           Use yellowish background color\n");
+    cerr << "Usage: target [options]\n";
+    cerr << "   -s WxH       Set size in inches (" << DEFAULT_GEOM << ")\n";
+    cerr << "   -m MARGIN    Set page margin (" << DEFAULT_MARGIN << ")\n";
+    cerr << "   -o FNAME     Set output filename (" << DEFAULT_FNAME << ")\n";
+    cerr << "   -r RINGS     Set number of rings (" << DEFAULT_RINGS << ")\n";
+    cerr << "   -I IRINGS    Set number of inner rings (" << DEFAULT_IRINGS << ")\n";
+    cerr << "   -O ORINGS    Set number of outer rings (" << DEFAULT_ORINGS << ")\n";
+    cerr << "   -l LINEW     Set line width (" << DEFAULT_LINEW << ")\n";
+    cerr << "   -b           Use yellowish background color\n";
     exit(2);
 }
 
-#define ALIGN_H_CENTER		1
-#define ALIGN_H_LEFT		2
-#define ALIGN_H_RIGHT		4
+const unsigned int ALIGN_H_CENTER = 1;
+const unsigned int ALIGN_H_LEFT = 2;
+const unsigned int ALIGN_H_RIGHT = 4;
 
-#define ALIGN_V_CENTER		8
-#define ALIGN_V_TOP		16
-#define ALIGN_V_BOTTOM		32
+const unsigned int ALIGN_V_CENTER = 8;
+const unsigned int ALIGN_V_TOP = 16;
+const unsigned int ALIGN_V_BOTTOM = 32;
 
 void
 aligned_text(cairo_t *cr, double x, double y, unsigned int align, const char *text)
@@ -68,17 +71,10 @@ aligned_text(cairo_t *cr, double x, double y, unsigned int align, const char *te
     cairo_text_extents_t te;
     cairo_text_extents(cr, text, &te);
 
-    double dx = 0;
-    if (align & ALIGN_H_CENTER)
-	dx = -te.width / 2;
-    else if (align & ALIGN_H_RIGHT)
-	dx = -te.width;
-
-    double dy = 0;
-    if (align & ALIGN_V_CENTER)
-	dy = te.height / 2;
-    else if (align & ALIGN_V_TOP)
-	dy = te.height;
+    double dx = ((align & ALIGN_H_CENTER) ? -te.width / 2 :
+		 (align & ALIGN_H_RIGHT) ? -te.width : 0);
+    double dy = ((align & ALIGN_V_CENTER) ? te.height / 2 :
+		 (align & ALIGN_V_TOP) ? te.height : 0);
 
     cairo_save(cr);
     cairo_move_to(cr, x + dx, y + dy);
@@ -86,24 +82,13 @@ aligned_text(cairo_t *cr, double x, double y, unsigned int align, const char *te
     cairo_restore(cr);
 }
 
-void
-target_eye(cairo_t *cr, double x, double y, double r)
-{
-    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
-    cairo_arc(cr, x, y, r, 0.0, 2 * M_PI);
-    cairo_fill_preserve(cr);
-
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
-    cairo_stroke(cr);
-}
-
 struct fish {
     fish() {
 	im = cairo_image_surface_create_from_png(FISH_IMAGE);
 	cairo_status_t status = cairo_surface_status(im);
 	if (status != 0) {
-	    perr("Could not load image %s: %s\n",
-		 FISH_IMAGE, cairo_status_to_string(status));
+	    cerr << "Could not load image " << FISH_IMAGE << ": " <<
+		cairo_status_to_string(status) << "\n";
 	    exit(1);
 	}
 	cairo_t *im_cr;
@@ -145,11 +130,22 @@ struct fish {
 };
 
 void
+target_eye(cairo_t *cr, double x, double y, double r)
+{
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+    cairo_arc(cr, x, y, r, 0.0, 2 * M_PI);
+    cairo_fill_preserve(cr);
+
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+    cairo_stroke(cr);
+}
+
+void
 check_status(cairo_t *cr)
 {
     cairo_status_t status = cairo_status(cr);
     if (status != 0) {
-	perr("Operation failed: %s\n", cairo_status_to_string(status));
+	cerr << "Operation failed: " << cairo_status_to_string(status) << "\n";
 	exit(1);
     }
 }
@@ -213,14 +209,14 @@ main(int argc, char *argv[])
     if (s == NULL)
 	usage();
 
-    double width = INCH_PT(atof(opt_geom));
-    double height = INCH_PT(atof(s + 1));
-    double margin = INCH_PT(opt_margin);
+    double width = inch_pt(atof(opt_geom));
+    double height = inch_pt(atof(s + 1));
+    double margin = inch_pt(opt_margin);
     double cx = width / 2;
     double cy = height / 2;
-    double linew = INCH_PT(opt_linew);
+    double linew = inch_pt(opt_linew);
 
-    //    ((    ((    (( c ))    ))    ))
+    //    ((   ((   ((   o   ))   ))   ))
     //    |<-- radius -->|
     int radius;			// Radius of outside of outer ring
     if (width < height)
@@ -283,23 +279,27 @@ main(int argc, char *argv[])
     cairo_set_font_size(cr, rs / 2);
 
     for (int ring = 1; ring <= opt_rings; ring++) {
-	char buf[80];
-	snprintf(buf, sizeof (buf), "%d", ring);
 	if (ring <= opt_irings || ring > opt_rings - opt_orings)
 	    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
 	else
 	    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
-	aligned_text(cr, cx + ring * rs, cy, ALIGN_H_CENTER | ALIGN_V_CENTER, buf);
-	aligned_text(cr, cx - ring * rs, cy, ALIGN_H_CENTER | ALIGN_V_CENTER, buf);
-	aligned_text(cr, cx, cy + ring * rs, ALIGN_H_CENTER | ALIGN_V_CENTER, buf);
-	aligned_text(cr, cx, cy - ring * rs, ALIGN_H_CENTER | ALIGN_V_CENTER, buf);
+
+	ostringstream num_buf;
+	num_buf << ring;
+	const string num_str = num_buf.str();
+	const char *num_s = num_str.c_str();
+
+	aligned_text(cr, cx + ring * rs, cy, ALIGN_H_CENTER | ALIGN_V_CENTER, num_s);
+	aligned_text(cr, cx - ring * rs, cy, ALIGN_H_CENTER | ALIGN_V_CENTER, num_s);
+	aligned_text(cr, cx, cy + ring * rs, ALIGN_H_CENTER | ALIGN_V_CENTER, num_s);
+	aligned_text(cr, cx, cy - ring * rs, ALIGN_H_CENTER | ALIGN_V_CENTER, num_s);
     }
 
     cairo_new_path(cr);
 
     // Four extra target eyes
-    //double tr = ring_radius(radius, opt_rings, opt_rings - 0);
-    double tr = ring_radius(radius, opt_rings, opt_rings - 1);
+    int eye_ring = opt_rings - 1;
+    double tr = ring_radius(radius, opt_rings, eye_ring);
     double td = tr * sqrt(2.0) / 2;
 
     target_eye(cr, cx - td, cy - td, rs / 2);
@@ -311,7 +311,7 @@ main(int argc, char *argv[])
     fish *f = new fish;
 
     double image_inches = 2.0;
-    double image_width = INCH_PT(image_inches);		// in points
+    double image_width = inch_pt(image_inches);
     f->width_set(image_width);
     double image_height = f->height_get();
 
@@ -325,11 +325,13 @@ main(int argc, char *argv[])
     // Additional labels
     int font_size = 12;
     int den = 32;
-    int num = (int)(PT_INCH(rs) * 32 + 0.5);
+    int num = (int)(pt_inch(rs) * 32 + 0.5);
     int g = gcd(num, den);
-    char rs_buf[80];
 
-    snprintf(rs_buf, sizeof (rs_buf), "Ring spacing %d/%d\"", num / g, den / g);
+    ostringstream rs_buf;
+    rs_buf << "Ring spacing " << (num / g) << "/" << (den / g) << "\"";
+    const string rs_str = rs_buf.str();
+    const char *rs_s = rs_str.c_str();
 
     cairo_select_font_face(cr, "Helvetica", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, font_size);
@@ -339,7 +341,7 @@ main(int argc, char *argv[])
     aligned_text(cr, width - margin - image_width / 2, margin + image_height + font_size,
 		 ALIGN_H_CENTER | ALIGN_V_TOP, "www.fishlet.com");
     aligned_text(cr, margin + image_width / 2, height - margin - image_height - font_size,
-		 ALIGN_H_CENTER | ALIGN_V_BOTTOM, rs_buf);
+		 ALIGN_H_CENTER | ALIGN_V_BOTTOM, rs_s);
     aligned_text(cr, width - margin - image_width / 2, height - margin - image_height - font_size,
 		 ALIGN_H_CENTER | ALIGN_V_BOTTOM, "Copyright © 2022");
 
